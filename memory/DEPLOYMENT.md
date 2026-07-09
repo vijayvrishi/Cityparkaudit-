@@ -23,7 +23,8 @@ Browser
   │
   ├── GET/static assets ──────────────► S3 static website hosting
   │                                     bucket: citypark-audit-frontend-516887748193-ap-south-1
-  │                                     (Expo web export, built via `npx expo export --platform web`)
+  │                                     (Expo web export, built via `npm run export:web`,
+  │                                      which also injects PWA <head> tags - see Gotcha #6)
   │
   └── fetch('EXPO_PUBLIC_BACKEND_URL/api/...')
                 │
@@ -127,8 +128,8 @@ aws lambda update-function-code --function-name citypark-audit-backend \
 cd frontend
 # frontend/.env.production should already have:
 #   EXPO_PUBLIC_BACKEND_URL=https://ub8pyznzb7.execute-api.ap-south-1.amazonaws.com
-EXPO_OFFLINE=1 npx expo export --platform web
-aws s3 sync dist s3://citypark-audit-frontend-516887748193-ap-south-1 --region ap-south-1
+EXPO_OFFLINE=1 npm run export:web   # = expo export --platform web + inject-pwa-head.js
+aws s3 sync dist s3://citypark-audit-frontend-516887748193-ap-south-1 --region ap-south-1 --delete
 ```
 
 ### Update an environment variable / rotate a secret
@@ -214,3 +215,15 @@ Lambda function (`Port: "8001"` since the Dockerfile's uvicorn binds there).
    Atlas (`mongodb+srv://` wire protocol isn't HTTP-proxied). Neither restriction applies to
    resources actually running in AWS (Lambda, CodeBuild) — only to testing directly from this
    sandbox.
+
+6. **`app/+html.tsx` is ignored** because `app.json`'s `web.output` is `"single"` (client-only SPA) —
+   expo-router only honors that file for `"static"`/`"server"` output. The PWA `<head>` tags
+   (manifest link, icons, service worker registration) are injected into `dist/index.html` after
+   the fact by `frontend/scripts/inject-pwa-head.js`, run via `npm run export:web`. If you ever
+   switch `web.output` to `"static"`, move that logic back into `+html.tsx` and delete the script.
+
+7. **PWA installability needs HTTPS.** Service workers won't register on a plain-HTTP origin
+   (browsers require HTTPS or `localhost`). The manifest/icons/service worker are all deployed and
+   working, but "Add to Home Screen" / install-prompt behavior won't fully activate until the
+   frontend is served over HTTPS (e.g. via CloudFront in front of the S3 bucket, or a custom
+   domain with ACM).
