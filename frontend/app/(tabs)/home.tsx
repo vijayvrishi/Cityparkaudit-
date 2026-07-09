@@ -90,7 +90,14 @@ export default function HomeScreen() {
           <Image source={{ uri: HERO_IMG }} style={StyleSheet.absoluteFill} contentFit="cover" />
           <LinearGradient colors={["rgba(18,18,18,0.15)", "rgba(18,18,18,0.92)"]} style={StyleSheet.absoluteFill} />
           <View style={styles.heroContent} pointerEvents="box-none">
-            <Text style={styles.heroKicker}>CITY PARK HOTEL</Text>
+            <View style={styles.heroBrandRow}>
+              <Image
+                source={require("@/assets/images/logo-transparent.png")}
+                style={styles.heroLogo}
+                contentFit="contain"
+              />
+              <Text style={styles.heroKicker}>CITY PARK HOTEL</Text>
+            </View>
             <Text style={styles.heroTitle}>Audit Command Center</Text>
             <Text style={styles.heroDate}>{today}</Text>
             <View style={styles.heroStatsRow}>
@@ -244,6 +251,8 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: "rgba(255,255,255,0.15)",
   },
   heroContent: { flex: 1, justifyContent: "flex-end", padding: SP.lg },
+  heroBrandRow: { flexDirection: "row", alignItems: "center", gap: SP.xs },
+  heroLogo: { width: 20, height: 20 },
   heroKicker: { color: C.goldSoft, fontSize: 11, letterSpacing: 3 },
   heroTitle: { color: C.text, fontSize: 30, fontFamily: F.display, marginTop: SP.xs },
   heroDate: { color: C.text2, fontSize: 12, marginTop: 2 },

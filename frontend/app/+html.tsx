@@ -13,6 +13,12 @@ export default function Root({ children }: PropsWithChildren) {
           content="width=device-width, initial-scale=1, shrink-to-fit=no"
         />
         {/*
+          Note: this file (+html.tsx) is only used by expo-router's "static"/"server"
+          web output. This app builds with web.output = "single" (SPA), which ignores
+          it - PWA <head> tags (manifest, icons, service worker) are injected into
+          dist/index.html post-build instead, see scripts/inject-pwa-head.js.
+        */}
+        {/*
           Disable body scrolling on web to make ScrollView components work correctly.
           If you want to enable scrolling, remove `ScrollViewStyleReset` and
           set `overflow: auto` on the body style below.

@@ -61,6 +61,11 @@ export default function LoginScreen() {
         contentContainerStyle={{ flexGrow: 1, justifyContent: "center", padding: SP.xl, paddingTop: insets.top + SP.xl, paddingBottom: insets.bottom + SP.xl }}
         showsVerticalScrollIndicator={false}
       >
+        <Image
+          source={require("@/assets/images/logo-transparent.png")}
+          style={styles.logo}
+          contentFit="contain"
+        />
         <Text style={styles.kicker}>CITY PARK HOTEL</Text>
         <Text style={styles.title}>CityPark Audit</Text>
         <Text style={styles.subtitle}>
@@ -136,6 +141,7 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
+  logo: { width: 92, height: 92, alignSelf: "center", marginBottom: SP.sm },
   kicker: { color: C.goldSoft, fontSize: 11, letterSpacing: 4, textAlign: "center" },
   title: { color: C.text, fontSize: 40, fontFamily: F.display, textAlign: "center", marginTop: SP.xs },
   subtitle: { color: C.text2, fontSize: 14, textAlign: "center", marginTop: SP.xs, marginBottom: SP.xl },
