@@ -101,6 +101,18 @@ export default function AuditScreen() {
       showToast(`${current.length - answeredNow} checks still unanswered`, "error");
       return;
     }
+    if (complete) {
+      const missingPhoto = current.filter((i) => i.result === "fail" && !i.photo_base64);
+      if (missingPhoto.length) {
+        showToast(
+          missingPhoto.length === 1
+            ? "A photo is required for the failed check before completing"
+            : `Photos are required for ${missingPhoto.length} failed checks before completing`,
+          "error"
+        );
+        return;
+      }
+    }
     setSubmitting(true);
     try {
       const updated = await api<Audit>(`/audits/${id}`, {
@@ -240,8 +252,9 @@ export default function AuditScreen() {
             <Text style={styles.sectionTitle}>{section.name}</Text>
             {section.items.map((item) => {
               const resultMeta = RESULTS.find((r) => r.key === item.result);
+              const photoRequired = item.result === "fail" && !item.photo_base64;
               return (
-                <View key={item.id} style={[styles.itemCard, isCompleted && item.result === "fail" && { borderColor: C.error }]} testID={`audit-item-${item.id}`}>
+                <View key={item.id} style={[styles.itemCard, item.result === "fail" && { borderColor: C.error }]} testID={`audit-item-${item.id}`}>
                   <Text style={styles.itemText}>{item.text}</Text>
 
                   {isCompleted ? (
@@ -285,11 +298,13 @@ export default function AuditScreen() {
                         </Pressable>
                         <Pressable
                           testID={`item-${item.id}-photo-button`}
-                          style={styles.toolBtn}
+                          style={[styles.toolBtn, photoRequired && { borderColor: C.error, backgroundColor: C.errorBg }]}
                           onPress={() => setPhotoTarget(item.id)}
                         >
-                          <Ionicons name="camera-outline" size={16} color={item.photo_base64 ? C.gold : C.text3} />
-                          <Text style={[styles.toolText, item.photo_base64 ? { color: C.gold } : null]}>Photo</Text>
+                          <Ionicons name="camera-outline" size={16} color={item.photo_base64 ? C.gold : photoRequired ? C.error : C.text3} />
+                          <Text style={[styles.toolText, item.photo_base64 ? { color: C.gold } : photoRequired ? { color: C.error } : null]}>
+                            {photoRequired ? "Photo required" : "Photo"}
+                          </Text>
                         </Pressable>
                       </View>
                       {(noteOpen[item.id] || !!item.note) && (
@@ -409,7 +424,10 @@ const styles = StyleSheet.create({
   },
   segText: { color: C.text3, fontSize: 13 },
   toolRow: { flexDirection: "row", gap: SP.lg },
-  toolBtn: { flexDirection: "row", alignItems: "center", gap: SP.xs, minHeight: 32 },
+  toolBtn: {
+    flexDirection: "row", alignItems: "center", gap: SP.xs, minHeight: 32,
+    borderWidth: 1, borderColor: "transparent", borderRadius: R.pill, paddingHorizontal: SP.sm,
+  },
   toolText: { color: C.text3, fontSize: 13 },
   noteInput: {
     backgroundColor: C.surface2, borderRadius: R.md, borderWidth: 1, borderColor: C.border,
