@@ -244,37 +244,43 @@ SEED_TEMPLATES = [
         ],
     },
     {
-        "name": "Guest Room Experience",
+        "name": "Room Checklist",
         "department": "Housekeeping",
         "icon": "bed-outline",
         "sections": [
-            {"name": "Bedroom Cleanliness", "items": [
-                "Bed linen crisp, fresh and free of stains or hair",
-                "All surfaces, skirting and under-bed areas dust free",
-                "Windows, mirrors and glass smudge free",
-                "Carpet / flooring spotless with no debris",
-                "No odours — room smells fresh and neutral",
-            ]},
-            {"name": "Bedroom Condition & Comfort", "items": [
-                "Furniture and walls free of scratches, chips or stains",
-                "All lighting, switches and sockets fully functional",
-                "AC quiet and set to arrival standard (22°C)",
-                "Blackout curtains and sheers fully operational",
-                "TV, telephone and Wi-Fi working with instructions displayed",
+            {"name": "Room", "items": [
+                "Room number plate, doorbell, lock, DND & Clean my room signage, and fire map should be clean & in working order.",
+                "Main door clean with entrance area free of dust & debris; peephole, safety latch, and door in good condition.",
+                "ESD & light sockets should be clean, presentable & in working order.",
+                "Room at a comfortable temperature and free of odour.",
+                "Room freshener sprayed.",
+                "Luggage rack free of dust; wardrobe cleaned properly with correct number of hangers, shoe shiner, slippers, and safe in working condition.",
+                "Kettle set up properly with cleaned base, filter, cup, saucer & spoon.",
+                "TV should be clean and in working order.",
+                "Minibar cabinet & freezer cleaned properly.",
+                "Writing table presentable with lamp clean & in working condition.",
+                "Dustbin and insert clean and in good condition.",
+                "Guest stationery folder in crisp condition; letterheads, envelopes, pen, postcards, and service directory contains maintained inserts.",
+                "All window ledges and glass clean and free of smears.",
+                "Curtains should be stain-free, with straight fall and proper fitting.",
+                "Upholstered furniture clean and free of stains.",
+                "All furniture/surfaces clean, free of dust and stains.",
+                "Carpet freshly vacuumed; floor cleaned and free of stains.",
+                "Bed made professionally with clean, stain-free, and tear-free linen; runner & cushion in proper condition.",
+                "Bedside table properly cleaned along with clean glasses, water bottle, phone, and TV remote in working order with crisp notepad and pencil.",
+                "All light fixtures in working condition and fittings clean and dust-free.",
             ]},
             {"name": "Bathroom", "items": [
-                "Floor, walls and grouting spotless and mold free",
-                "Towels plush, matching, fresh and correctly presented",
-                "Full range of luxury branded amenities replenished",
-                "Hot water available within 30 seconds at correct pressure",
-                "Toilet, sink and shower sanitized and polished",
-            ]},
-            {"name": "Evening Turndown", "items": [
-                "Turndown completed before guest returns (by 21:00)",
-                "Bed prepared with turndown amenity placed",
-                "Used towels and amenities replaced",
-                "Curtains drawn, lighting dimmed to night setting",
-                "Guest belongings tidied respectfully, never rearranged",
+                "Bathroom door clean, free of dust; mirror free of any smears.",
+                "Vanity counter area properly cleaned with amenity tray, waste bin clean, full tissue box & other supplies.",
+                "All equipment, light fixtures & power sockets in working condition and fittings clean and dust-free.",
+                "Rain shower & shower fittings should be in working condition.",
+                "Shower area glass free of water marks, wall free of soap scum & drain clean.",
+                "Bathtub & curtain should be clean & in proper working condition.",
+                "Shower controls cleaned & working.",
+                "WC clean and in good condition along with dustbin and insert.",
+                "Exhaust vent should be clean & in working order.",
+                "Bathroom floor clean and free of debris.",
             ]},
         ],
     },
@@ -451,7 +457,7 @@ SEED_TEMPLATES = [
 ]
 
 OLD_SEED_NAMES = ["Guest Room Inspection", "Kitchen & F&B Hygiene", "Front Office & Lobby", "Pool, Gym & Wellness"]
-SEED_VERSION = 3
+SEED_VERSION = 4
 
 
 async def seed_templates():

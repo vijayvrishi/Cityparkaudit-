@@ -21,9 +21,9 @@ def a_template(s):
     assert r.status_code == 200
     templates = r.json()
     assert len(templates) >= 8, f"Expected 8 LQA templates, got {len(templates)}"
-    # Pick "Guest Room Experience" if present
+    # Pick "Room Checklist" if present
     for t in templates:
-        if t["name"] == "Guest Room Experience":
+        if t["name"] == "Room Checklist":
             return t
     return templates[0]
 
@@ -34,7 +34,7 @@ class TestRegressionBasics:
         r = s.get(f"{API}/templates", timeout=20)
         assert r.status_code == 200
         names = {t["name"] for t in r.json()}
-        expected = {"Guest Room Experience", "Arrival & Check-In", "In-Room Dining",
+        expected = {"Room Checklist", "Arrival & Check-In", "In-Room Dining",
                     "Restaurant & Breakfast", "Bar Service", "Telephone & Concierge",
                     "Check-Out & Departure", "Spa, Pool & Fitness"}
         assert expected.issubset(names), f"Missing LQA templates. Got: {names}"

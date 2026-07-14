@@ -214,8 +214,20 @@ export function buildAuditHtml(audit: Audit): string {
 export async function exportAuditPdf(audit: Audit): Promise<void> {
   const html = buildAuditHtml(audit);
   if (Platform.OS === "web") {
-    // Web: open the system print dialog (user can save as PDF)
-    await Print.printAsync({ html });
+    // expo-print's web implementation ignores the `html` option entirely and just
+    // calls window.print() on whatever page is currently open - it never renders
+    // our report. Render it ourselves in a new window and print/"Save as PDF" that.
+    const printHtml = html.replace(
+      "</body>",
+      `<script>window.onload = function () { setTimeout(function () { window.print(); }, 50); };</script></body>`
+    );
+    const win = window.open("", "_blank");
+    if (!win) {
+      throw new Error("Please allow pop-ups for this site to export the PDF");
+    }
+    win.document.open();
+    win.document.write(printHtml);
+    win.document.close();
     return;
   }
   const { uri } = await Print.printToFileAsync({ html });
