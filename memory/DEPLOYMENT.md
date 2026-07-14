@@ -141,6 +141,22 @@ aws lambda update-function-configuration --function-name citypark-audit-backend 
 ```
 (Must pass the **entire** variable set each time — this call replaces the whole map, it doesn't merge.)
 
+### Re-seed templates/admin after bumping SEED_VERSION
+
+`lambda_handler.py` runs with `Mangum(app, lifespan="off")` (see Gotcha #2), so `server.py`'s
+`@app.on_event("startup")` (which does the seeding) never fires on the deployed Lambda. To pick up
+a `SEED_VERSION` bump after editing `SEED_TEMPLATES`:
+
+```bash
+# 1. Edit lambda_handler.py: lifespan="off" -> lifespan="auto", rebuild+deploy the zip as above
+# 2. Trigger exactly one request to force a cold start (lifespan startup runs before the route
+#    handler, so this works even if the request itself 401s/404s):
+curl -s https://ub8pyznzb7.execute-api.ap-south-1.amazonaws.com/api/templates -H "Authorization: Bearer x"
+# 3. Immediately revert lifespan="auto" -> "off" and rebuild+deploy again, before any second
+#    request can hit the same warm container and crash (Gotcha #2)
+# 4. Verify: log in and GET /api/templates, confirm the new content is there
+```
+
 ### Tear down everything
 
 ```bash
