@@ -8,6 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
+import * as ImageManipulator from "expo-image-manipulator";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { api, Audit, AuditItem } from "@/src/api";
 import { exportAuditPdf } from "@/src/pdf";
@@ -80,11 +81,23 @@ export default function AuditScreen() {
         }
       }
       const result = fromCamera
-        ? await ImagePicker.launchCameraAsync({ base64: true, quality: 0.3 })
-        : await ImagePicker.launchImageLibraryAsync({ base64: true, quality: 0.3, mediaTypes: ["images"] });
-      if (!result.canceled && result.assets[0]?.base64) {
-        setItem(itemId, { photo_base64: result.assets[0].base64 });
-        showToast("Photo attached");
+        ? await ImagePicker.launchCameraAsync({ quality: 0.5 })
+        : await ImagePicker.launchImageLibraryAsync({ quality: 0.5, mediaTypes: ["images"] });
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        // Downscale before storing - full-resolution camera photos as base64 in the
+        // audit's JSON payload can push a fully-photographed checklist past Lambda's
+        // 6MB synchronous invocation limit, which shows up as a bare "Failed to fetch".
+        const targetWidth = Math.min(asset.width || 1024, 1024);
+        const manipulated = await ImageManipulator.manipulateAsync(
+          asset.uri,
+          [{ resize: { width: targetWidth } }],
+          { compress: 0.5, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+        );
+        if (manipulated.base64) {
+          setItem(itemId, { photo_base64: manipulated.base64 });
+          showToast("Photo attached");
+        }
       }
     } catch {
       showToast("Could not capture photo", "error");
@@ -113,11 +126,19 @@ export default function AuditScreen() {
         return;
       }
     }
+    const body = JSON.stringify({ items: current, status: complete ? "completed" : "in_progress" });
+    // Lambda's synchronous invocation payload limit is a hard 6MB; a heavily-photographed
+    // audit approaching that shows up to fetch() as a bare "Failed to fetch" with no server
+    // response at all, which is confusing. Catch it here with an actionable message instead.
+    if (body.length > 5_500_000) {
+      showToast("This audit has too many/too-large photos to save at once - remove a photo and try again", "error");
+      return;
+    }
     setSubmitting(true);
     try {
       const updated = await api<Audit>(`/audits/${id}`, {
         method: "PUT",
-        body: JSON.stringify({ items: current, status: complete ? "completed" : "in_progress" }),
+        body,
       });
       if (complete) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
