@@ -454,10 +454,50 @@ SEED_TEMPLATES = [
             ]},
         ],
     },
+    {
+        "name": "Departure Room Checklist",
+        "department": "Maintenance",
+        "icon": "log-out-outline",
+        "sections": [
+            {"name": "Electrical", "items": [
+                "All switch & socket points clean and in working order",
+                "All lights functional with no flickering or fused bulbs",
+                "Electronic safe operational, lock and battery working",
+                "Hair dryer functional with cord in good condition",
+            ]},
+            {"name": "Air Conditioning", "items": [
+                "Indoor filter clean and free of dust",
+                "Grill temperature within standard range",
+                "Thermostat calibrated and responsive",
+                "Room reaches set temperature within standard time",
+                "Bathroom exhaust fan working and clean",
+                "Minibar cooling correctly and running quietly",
+            ]},
+            {"name": "Plumbing", "items": [
+                "All aerators clean and free of blockage",
+                "Taps secure with no shaking or looseness",
+                "Shower head clean with uniform spray, no leaks",
+                "Hot water reaches correct temperature within standard time",
+                "Bottle trap secure with no leaks",
+                "Drainage flowing freely with no blockage",
+            ]},
+            {"name": "Carpenter", "items": [
+                "All hinges lubricated and squeak-free",
+                "Main door closer speed adjusted correctly",
+                "All drawers slide smoothly and close properly",
+                "Bathroom cubicle door aligned and functioning",
+                "Wardrobe doors, shelves and fittings in good condition",
+            ]},
+            {"name": "Miscellaneous", "items": [
+                "Telephone(s) functional with dial tone",
+                "TV and set-top box powered on and functional",
+            ]},
+        ],
+    },
 ]
 
 OLD_SEED_NAMES = ["Guest Room Inspection", "Kitchen & F&B Hygiene", "Front Office & Lobby", "Pool, Gym & Wellness"]
-SEED_VERSION = 4
+SEED_VERSION = 5
 
 
 async def seed_templates():
