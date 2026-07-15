@@ -243,3 +243,14 @@ Lambda function (`Port: "8001"` since the Dockerfile's uvicorn binds there).
    working, but "Add to Home Screen" / install-prompt behavior won't fully activate until the
    frontend is served over HTTPS (e.g. via CloudFront in front of the S3 bucket, or a custom
    domain with ACM).
+
+8. **Lambda's synchronous invocation payload limit is a hard, non-configurable 6MB** (request and
+   response). Audit photos are stored as base64 directly in the audit's JSON body (`photo_base64`
+   per item) - a fully-photographed 30-item checklist at full camera resolution can reach 15-20MB+
+   and gets the connection reset before any HTTP response comes back, which browsers report as a
+   bare `Failed to fetch` with zero diagnostic info (no status code, no CORS error, nothing).
+   Mitigated client-side by downscaling photos to max 1024px wide via `expo-image-manipulator`
+   before storing (`app/audit/[id].tsx`), plus a client-side payload-size guard before the
+   save/complete PUT. If photos ever need to get bigger/more numerous than that allows, the real
+   fix is moving photo storage out of the JSON body entirely - upload each photo to S3 directly
+   and store a URL/key on the item instead of inline base64.
