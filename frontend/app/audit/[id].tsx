@@ -30,7 +30,6 @@ export default function AuditScreen() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [noteOpen, setNoteOpen] = useState<Record<string, boolean>>({});
-  const [photoTarget, setPhotoTarget] = useState<string | null>(null);
   const [permBlocked, setPermBlocked] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -68,21 +67,18 @@ export default function AuditScreen() {
     setItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, ...patch } : i)));
   };
 
-  const pickPhoto = async (fromCamera: boolean) => {
-    const itemId = photoTarget;
-    if (!itemId) return;
+  const takePhoto = async (itemId: string) => {
     try {
-      if (fromCamera) {
-        let perm = await ImagePicker.getCameraPermissionsAsync();
+      let perm = await ImagePicker.getCameraPermissionsAsync();
+      if (!perm.granted) {
+        if (!perm.canAskAgain) { setPermBlocked(true); return; }
+        perm = await ImagePicker.requestCameraPermissionsAsync();
         if (!perm.granted) {
-          if (!perm.canAskAgain) { setPermBlocked(true); return; }
-          perm = await ImagePicker.requestCameraPermissionsAsync();
-          if (!perm.granted) { if (!perm.canAskAgain) setPermBlocked(true); return; }
+          if (!perm.canAskAgain) setPermBlocked(true);
+          return;
         }
       }
-      const result = fromCamera
-        ? await ImagePicker.launchCameraAsync({ quality: 0.5 })
-        : await ImagePicker.launchImageLibraryAsync({ quality: 0.5, mediaTypes: ["images"] });
+      const result = await ImagePicker.launchCameraAsync({ quality: 0.5 });
       if (!result.canceled && result.assets[0]) {
         const asset = result.assets[0];
         // Downscale before storing - full-resolution camera photos as base64 in the
@@ -101,9 +97,6 @@ export default function AuditScreen() {
       }
     } catch {
       showToast("Could not capture photo", "error");
-    } finally {
-      setPhotoTarget(null);
-      setPermBlocked(false);
     }
   };
 
@@ -320,7 +313,7 @@ export default function AuditScreen() {
                         <Pressable
                           testID={`item-${item.id}-photo-button`}
                           style={[styles.toolBtn, photoRequired && { borderColor: C.error, backgroundColor: C.errorBg }]}
-                          onPress={() => setPhotoTarget(item.id)}
+                          onPress={() => takePhoto(item.id)}
                         >
                           <Ionicons name="camera-outline" size={16} color={item.photo_base64 ? C.gold : photoRequired ? C.error : C.text3} />
                           <Text style={[styles.toolText, item.photo_base64 ? { color: C.gold } : photoRequired ? { color: C.error } : null]}>
@@ -378,31 +371,22 @@ export default function AuditScreen() {
         </View>
       )}
 
-      {/* Photo source sheet */}
-      <Modal visible={!!photoTarget} transparent animationType="slide" onRequestClose={() => setPhotoTarget(null)}>
+      {/* Camera-permission-blocked sheet */}
+      <Modal
+        visible={permBlocked}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setPermBlocked(false)}
+      >
         <View style={styles.modalBackdrop}>
-          <Pressable style={{ flex: 1 }} onPress={() => { setPhotoTarget(null); setPermBlocked(false); }} />
+          <Pressable style={{ flex: 1 }} onPress={() => setPermBlocked(false)} />
           <View style={[styles.sheet, { paddingBottom: insets.bottom + SP.lg }]}>
             <View style={styles.sheetHandle} />
-            <Text style={styles.sheetTitle}>Attach Photo Evidence</Text>
-            {permBlocked ? (
-              <>
-                <Text style={styles.sheetSub}>Camera access is blocked. Enable it in Settings to take photos.</Text>
-                <Pressable testID="open-settings-button" style={styles.sheetOption} onPress={() => Linking.openSettings()}>
-                  <Ionicons name="settings-outline" size={20} color={C.gold} />
-                  <Text style={styles.sheetOptionText}>Open Settings</Text>
-                </Pressable>
-              </>
-            ) : (
-              <Text style={styles.sheetSub}>Photos help document issues found during the audit.</Text>
-            )}
-            <Pressable testID="photo-camera-button" style={styles.sheetOption} onPress={() => pickPhoto(true)}>
-              <Ionicons name="camera-outline" size={20} color={C.gold} />
-              <Text style={styles.sheetOptionText}>Take Photo</Text>
-            </Pressable>
-            <Pressable testID="photo-library-button" style={styles.sheetOption} onPress={() => pickPhoto(false)}>
-              <Ionicons name="images-outline" size={20} color={C.gold} />
-              <Text style={styles.sheetOptionText}>Choose from Library</Text>
+            <Text style={styles.sheetTitle}>Camera Access Needed</Text>
+            <Text style={styles.sheetSub}>Camera access is blocked. Enable it in Settings to take photos.</Text>
+            <Pressable testID="open-settings-button" style={styles.sheetOption} onPress={() => Linking.openSettings()}>
+              <Ionicons name="settings-outline" size={20} color={C.gold} />
+              <Text style={styles.sheetOptionText}>Open Settings</Text>
             </Pressable>
           </View>
         </View>
