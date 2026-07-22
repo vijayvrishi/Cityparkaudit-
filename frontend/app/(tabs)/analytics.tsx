@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator, FlatList, Pressable, ScrollView, StyleSheet, Text, View,
 } from "react-native";
@@ -17,6 +17,8 @@ export default function AnalyticsScreen() {
   const [stats, setStats] = useState<Analytics | null>(null);
   const [history, setHistory] = useState<Audit[]>([]);
   const [coverage, setCoverage] = useState<RoomCoverage | null>(null);
+  const [templateFilter, setTemplateFilter] = useState("All");
+  const [roomFilter, setRoomFilter] = useState("All");
 
   const load = useCallback(async () => {
     try {
@@ -39,6 +41,20 @@ export default function AnalyticsScreen() {
 
   const scoreColor = (s: number | null) =>
     s == null ? C.text3 : s >= 85 ? C.success : s >= 60 ? C.warn : C.error;
+
+  const historyTemplates = useMemo(
+    () => ["All", ...Array.from(new Set(history.map((a) => a.template_name)))],
+    [history]
+  );
+  const historyRooms = useMemo(
+    () => ["All", ...Array.from(new Set(history.filter((a) => a.location).map((a) => a.location as string)))],
+    [history]
+  );
+  const filteredHistory = history.filter(
+    (a) =>
+      (templateFilter === "All" || a.template_name === templateFilter) &&
+      (roomFilter === "All" || a.location === roomFilter)
+  );
 
   return (
     <View style={styles.container}>
@@ -67,6 +83,47 @@ export default function AnalyticsScreen() {
             <Text style={[styles.segmentText, tab === "history" && styles.segmentTextActive]}>History</Text>
           </Pressable>
         </View>
+
+        {tab === "history" && (
+          <>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.chipRow}
+              testID="history-template-filter"
+            >
+              {historyTemplates.map((t) => (
+                <Pressable
+                  key={t}
+                  testID={`history-template-chip-${t.toLowerCase().replace(/\s+/g, "-")}`}
+                  onPress={() => setTemplateFilter(t)}
+                  style={[styles.chip, templateFilter === t && styles.chipActive]}
+                >
+                  <Text style={[styles.chipText, templateFilter === t && styles.chipTextActive]}>{t}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+            {historyRooms.length > 1 && (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.chipRow}
+                testID="history-room-filter"
+              >
+                {historyRooms.map((r) => (
+                  <Pressable
+                    key={r}
+                    testID={`history-room-chip-${r.toLowerCase().replace(/\s+/g, "-")}`}
+                    onPress={() => setRoomFilter(r)}
+                    style={[styles.chip, roomFilter === r && styles.chipActive]}
+                  >
+                    <Text style={[styles.chipText, roomFilter === r && styles.chipTextActive]}>{r}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            )}
+          </>
+        )}
       </View>
 
       {loading ? (
@@ -178,13 +235,15 @@ export default function AnalyticsScreen() {
       ) : (
         <FlatList
           testID="history-list"
-          data={history}
+          data={filteredHistory}
           keyExtractor={(a) => a.id}
           contentContainerStyle={{ padding: SP.lg, paddingBottom: SP.xl }}
           ListEmptyComponent={
             <View style={styles.emptyBox} testID="history-empty">
               <Ionicons name="time-outline" size={26} color={C.text3} />
-              <Text style={styles.emptyText}>No completed audits yet</Text>
+              <Text style={styles.emptyText}>
+                {history.length === 0 ? "No completed audits yet" : "No audits match these filters"}
+              </Text>
             </View>
           }
           renderItem={({ item }) => (
@@ -226,6 +285,14 @@ const styles = StyleSheet.create({
   segmentActive: { backgroundColor: C.gold },
   segmentText: { color: C.text2, fontSize: 13 },
   segmentTextActive: { color: C.onGold },
+  chipRow: { gap: SP.sm, alignItems: "center" },
+  chip: {
+    height: 32, paddingHorizontal: SP.md, borderRadius: R.pill, backgroundColor: C.surface,
+    borderWidth: 1, borderColor: C.border, alignItems: "center", justifyContent: "center", flexShrink: 0,
+  },
+  chipActive: { backgroundColor: C.gold, borderColor: C.gold },
+  chipText: { color: C.text2, fontSize: 12 },
+  chipTextActive: { color: C.onGold },
   bigCard: {
     backgroundColor: C.surface, borderRadius: R.lg, padding: SP.xl, alignItems: "center",
     borderWidth: 1, borderColor: C.border,
