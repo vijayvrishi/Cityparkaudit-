@@ -66,6 +66,10 @@ deployment paths:
 | CodeBuild project | `citypark-audit-backend-build` | `arn:aws:codebuild:ap-south-1:516887748193:project/citypark-audit-backend-build` | Builds `backend/Dockerfile` and pushes to ECR (used because this dev sandbox can't pull Docker Hub images directly) |
 | IAM role (CodeBuild) | `citypark-audit-codebuild-role` | `arn:aws:iam::516887748193:role/citypark-audit-codebuild-role` | CodeBuild service role: CloudWatch Logs, S3 read on the source bucket, ECR push |
 | IAM role (App Runner, unused) | `citypark-audit-apprunner-ecr-access` | `arn:aws:iam::516887748193:role/citypark-audit-apprunner-ecr-access` | Created for App Runner's ECR access; App Runner itself was blocked by a new-account restriction, so this role is provisioned but has no attached service — safe to delete or reuse later |
+| Lambda function | `citypark-audit-notifier` | `arn:aws:lambda:ap-south-1:516887748193:function:citypark-audit-notifier` | Standalone function (not FastAPI/Mangum) — checks for schedules due today and overdue action items, sends web push for each. `backend/notifier/notifier.py` |
+| IAM role (notifier exec) | `citypark-audit-notifier-role` | `arn:aws:iam::516887748193:role/citypark-audit-notifier-role` | `AWSLambdaBasicExecutionRole` only (CloudWatch Logs) |
+| EventBridge rule | `citypark-audit-notifier-hourly` | `arn:aws:events:ap-south-1:516887748193:rule/citypark-audit-notifier-hourly` | `rate(1 hour)` — invokes `citypark-audit-notifier` directly (not through API Gateway) |
+| Lambda permission | statement id `eventbridge-invoke` | — | Grants the EventBridge rule above permission to invoke `citypark-audit-notifier` |
 
 ### MongoDB Atlas
 
@@ -91,6 +95,12 @@ Names only — see the separate credentials handoff for values.
 | `CORS_ORIGINS` | Currently `*` (open) — tighten to the real frontend origin once a custom domain is set |
 | `STAFF_EMAIL_DOMAIN` | `cityparkhotel.in` — restricts self-registration |
 | `GEMINI_API_KEY` | Google AI Studio key for the AI audit-summary feature (model `gemini-3-flash-preview`) |
+| `VAPID_PUBLIC_KEY` | Web Push VAPID public key (base64url, uncompressed EC point) — also readable via `GET /api/notifications/vapid-public-key` |
+| `VAPID_PRIVATE_KEY` | Web Push VAPID private key, PEM format. Also required on `citypark-audit-notifier` (same value) |
+| `VAPID_SUBJECT` | `mailto:admin@cityparkhotel.in` — required by the Web Push spec, sent as the VAPID `sub` claim |
+
+`citypark-audit-notifier`'s environment only needs `MONGO_URL`, `DB_NAME`, `VAPID_PRIVATE_KEY`,
+`VAPID_SUBJECT` (no JWT/admin/CORS vars — it's not an HTTP API).
 
 ---
 
@@ -110,7 +120,14 @@ pip install -q \
   --only-binary=:all: --target . \
   mangum==0.17.0 fastapi==0.110.1 motor==3.3.1 pymongo==4.6.3 bcrypt==4.1.3 \
   PyJWT==2.13.0 python-dotenv==1.2.2 pydantic==2.13.4 pydantic-core starlette==0.37.2 \
-  python-multipart==0.0.32 email-validator==2.3.0 dnspython google-genai==2.10.0
+  python-multipart==0.0.32 email-validator==2.3.0 dnspython google-genai==2.10.0 \
+  aiohttp cryptography==49.0.0
+
+# http_ece only ships as an sdist on PyPI (no wheel at all) - safe to build from source
+# since it's pure Python, but it means it can't go through the --only-binary install above
+pip install -q --target . --no-deps http_ece==1.2.1 pywebpush==2.3.0 py-vapid==1.9.4
+pip install -q --platform manylinux2014_x86_64 --implementation cp --python-version 3.11 \
+  --only-binary=:all: --target . requests
 
 cp ../backend/server.py ../backend/lambda_handler.py .
 zip -qr ../lambda-backend.zip . -x "__pycache__/*" -x "*.pyc"
@@ -129,7 +146,20 @@ cd frontend
 # frontend/.env.production should already have:
 #   EXPO_PUBLIC_BACKEND_URL=https://ub8pyznzb7.execute-api.ap-south-1.amazonaws.com
 EXPO_OFFLINE=1 npm run export:web   # = expo export --platform web + inject-pwa-head.js
-aws s3 sync dist s3://citypark-audit-frontend-516887748193-ap-south-1 --region ap-south-1 --delete
+
+BUCKET=citypark-audit-frontend-516887748193-ap-south-1
+# Long-cache the hashed/static assets...
+aws s3 sync dist "s3://$BUCKET" --region ap-south-1 --delete \
+  --cache-control "public, max-age=31536000, immutable" \
+  --exclude "index.html" --exclude "manifest.webmanifest" --exclude "sw.js"
+# ...but index.html/manifest/sw.js must always be revalidated, or a stale service worker
+# can keep serving yesterday's JS bundle indefinitely (see Gotcha #9)
+aws s3 cp dist/index.html "s3://$BUCKET/index.html" --region ap-south-1 \
+  --cache-control "no-cache, no-store, must-revalidate" --content-type "text/html"
+aws s3 cp dist/manifest.webmanifest "s3://$BUCKET/manifest.webmanifest" --region ap-south-1 \
+  --cache-control "no-cache, no-store, must-revalidate" --content-type "application/manifest+json"
+aws s3 cp dist/sw.js "s3://$BUCKET/sw.js" --region ap-south-1 \
+  --cache-control "no-cache, no-store, must-revalidate" --content-type "text/javascript"
 ```
 
 ### Update an environment variable / rotate a secret
@@ -157,9 +187,39 @@ curl -s https://ub8pyznzb7.execute-api.ap-south-1.amazonaws.com/api/templates -H
 # 4. Verify: log in and GET /api/templates, confirm the new content is there
 ```
 
+### Update the notifier Lambda and redeploy
+
+```bash
+mkdir notifier_pkg && cd notifier_pkg
+pip install -q --platform manylinux2014_x86_64 --implementation cp --python-version 3.11 \
+  --only-binary=:all: --target . motor==3.3.1 pymongo==4.6.3 dnspython aiohttp cryptography==49.0.0
+pip install -q --target . --no-deps http_ece==1.2.1 pywebpush==2.3.0 py-vapid==1.9.4
+pip install -q --platform manylinux2014_x86_64 --implementation cp --python-version 3.11 \
+  --only-binary=:all: --target . requests
+
+cp ../backend/notifier/notifier.py .
+zip -qr ../notifier.zip . -x "__pycache__/*" -x "*.pyc"
+cd ..
+
+aws s3 cp notifier.zip s3://citypark-audit-src-516887748193-ap-south-1/notifier.zip
+aws lambda update-function-code --function-name citypark-audit-notifier \
+  --s3-bucket citypark-audit-src-516887748193-ap-south-1 --s3-key notifier.zip \
+  --region ap-south-1
+```
+
+To test it immediately rather than waiting for the hourly EventBridge trigger:
+```bash
+aws lambda invoke --function-name citypark-audit-notifier --region ap-south-1 out.json && cat out.json
+```
+
 ### Tear down everything
 
 ```bash
+aws events remove-targets --rule citypark-audit-notifier-hourly --ids 1 --region ap-south-1
+aws events delete-rule --name citypark-audit-notifier-hourly --region ap-south-1
+aws lambda delete-function --function-name citypark-audit-notifier --region ap-south-1
+aws iam detach-role-policy --role-name citypark-audit-notifier-role --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+aws iam delete-role --role-name citypark-audit-notifier-role
 aws lambda delete-function --function-name citypark-audit-backend --region ap-south-1
 aws apigatewayv2 delete-api --api-id ub8pyznzb7 --region ap-south-1
 aws s3 rb s3://citypark-audit-frontend-516887748193-ap-south-1 --force
@@ -254,3 +314,25 @@ Lambda function (`Port: "8001"` since the Dockerfile's uvicorn binds there).
    save/complete PUT. If photos ever need to get bigger/more numerous than that allows, the real
    fix is moving photo storage out of the JSON body entirely - upload each photo to S3 directly
    and store a URL/key on the item instead of inline base64.
+
+9. **The service worker can perpetuate a stale app indefinitely if `index.html`/`sw.js` are
+   cacheable.** S3 sets no `Cache-Control` by default, so browsers apply heuristic caching - and
+   the service worker's own internal `fetch()` calls are *also* subject to that same HTTP cache
+   unless told otherwise, which defeats a "network-first" strategy silently (it thinks it fetched
+   fresh content; it actually got a cached response). Symptom: a code fix is deployed and verified
+   working via `curl`, but a real browser that already has the app open keeps exhibiting the fixed
+   bug indefinitely, even across reloads. Fixed by (a) setting
+   `Cache-Control: no-cache, no-store, must-revalidate` on `index.html`, `manifest.webmanifest`,
+   and `sw.js` specifically (everything else can be long-cached since filenames are content-hashed),
+   and (b) `fetch(event.request, { cache: "no-store" })` inside the service worker itself. When
+   this bites, a hard refresh / "clear site data" works around it for that one user, but the real
+   fix is the headers - don't rely on telling users to hard-refresh.
+
+10. **`pywebpush`'s `send()` calls `requests.post()` with no exception wrapping around the network
+    call itself** - only HTTP-level failures (4xx/5xx responses) come back as `WebPushException`.
+    A genuinely unreachable/malformed endpoint raises a raw `requests` exception instead. Since
+    push sends happen inline inside `register()` and `update_audit()`, catching only
+    `WebPushException` would let one stale/bad subscription 500 an unrelated user's registration
+    or audit completion. Both `send_push_to_all` implementations (in `server.py` and
+    `backend/notifier/notifier.py`) catch a bare `Exception` around each individual send for this
+    reason - never narrow that back to `WebPushException` alone.
