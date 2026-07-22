@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View,
 } from "react-native";
@@ -9,6 +9,10 @@ import { api, User } from "@/src/api";
 import { useAuth } from "@/src/auth";
 import { showToast } from "@/src/toast";
 import { C, F, R, SP } from "@/src/theme";
+import {
+  isPushSupported, getNotificationPermission, getExistingSubscription,
+  enablePushNotifications, disablePushNotifications,
+} from "@/src/push";
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
@@ -17,6 +21,39 @@ export default function ProfileScreen() {
   const isAdmin = user?.role === "admin";
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(isAdmin);
+  const [pushSupported] = useState(isPushSupported());
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+
+  useEffect(() => {
+    if (!pushSupported) return;
+    getExistingSubscription().then((sub) => setPushEnabled(!!sub));
+  }, [pushSupported]);
+
+  const togglePush = async () => {
+    setPushBusy(true);
+    try {
+      if (pushEnabled) {
+        await disablePushNotifications();
+        setPushEnabled(false);
+        showToast("Notifications disabled");
+      } else {
+        const ok = await enablePushNotifications();
+        setPushEnabled(ok);
+        if (ok) {
+          showToast("Notifications enabled");
+        } else if (getNotificationPermission() === "denied") {
+          showToast("Notifications are blocked in your browser settings", "error");
+        } else {
+          showToast("Could not enable notifications", "error");
+        }
+      }
+    } catch (e: any) {
+      showToast(e.message || "Could not update notifications", "error");
+    } finally {
+      setPushBusy(false);
+    }
+  };
 
   const load = useCallback(async () => {
     if (!isAdmin) return;
@@ -84,6 +121,34 @@ export default function ProfileScreen() {
                 </Text>
               </View>
             </View>
+
+            {pushSupported && (
+              <Pressable
+                testID="notifications-toggle"
+                style={styles.notifRow}
+                onPress={togglePush}
+                disabled={pushBusy}
+              >
+                <Ionicons
+                  name={pushEnabled ? "notifications" : "notifications-outline"}
+                  size={18}
+                  color={pushEnabled ? C.gold : C.text2}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.notifTitle}>Notifications</Text>
+                  <Text style={styles.notifSub}>
+                    Due audits, failed checks, overdue actions & new registrations
+                  </Text>
+                </View>
+                {pushBusy ? (
+                  <ActivityIndicator color={C.gold} size="small" />
+                ) : (
+                  <View style={[styles.switchTrack, pushEnabled && { backgroundColor: C.gold }]}>
+                    <View style={[styles.switchThumb, pushEnabled && { alignSelf: "flex-end" }]} />
+                  </View>
+                )}
+              </Pressable>
+            )}
 
             <Pressable testID="logout-button" style={styles.logoutBtn} onPress={logout}>
               <Ionicons name="log-out-outline" size={18} color={C.error} />
@@ -158,6 +223,18 @@ const styles = StyleSheet.create({
   meEmail: { color: C.text3, fontSize: 13, marginTop: 1 },
   rolePill: { backgroundColor: C.surface2, borderRadius: R.pill, paddingHorizontal: SP.md, paddingVertical: 5 },
   roleText: { color: C.text2, fontSize: 12 },
+  notifRow: {
+    marginTop: SP.md, flexDirection: "row", alignItems: "center", gap: SP.md,
+    backgroundColor: C.surface, borderRadius: R.md, borderWidth: 1, borderColor: C.border,
+    padding: SP.lg,
+  },
+  notifTitle: { color: C.text, fontSize: 15 },
+  notifSub: { color: C.text3, fontSize: 12, marginTop: 2 },
+  switchTrack: {
+    width: 44, height: 26, borderRadius: R.pill, backgroundColor: C.surface2,
+    borderWidth: 1, borderColor: C.border, padding: 2, justifyContent: "center",
+  },
+  switchThumb: { width: 20, height: 20, borderRadius: R.pill, backgroundColor: C.text },
   logoutBtn: {
     marginTop: SP.md, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: SP.sm,
     minHeight: 48, borderRadius: R.md, borderWidth: 1, borderColor: C.errorBg,

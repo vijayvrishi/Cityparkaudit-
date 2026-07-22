@@ -1,5 +1,6 @@
 import os
 import uuid
+import json
 import logging
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
@@ -13,6 +14,7 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
+from pywebpush import webpush, WebPushException
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -30,6 +32,58 @@ logger = logging.getLogger(__name__)
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# ---------- Push Notifications ----------
+VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "")
+VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY", "")
+VAPID_SUBJECT = os.environ.get("VAPID_SUBJECT", "mailto:admin@cityparkhotel.in")
+
+
+class PushKeys(BaseModel):
+    p256dh: str
+    auth: str
+
+
+class PushSubscriptionIn(BaseModel):
+    endpoint: str
+    keys: PushKeys
+
+
+class PushUnsubscribeIn(BaseModel):
+    endpoint: str
+
+
+async def send_push_to_all(title: str, body: str, url: str = "/"):
+    if not VAPID_PRIVATE_KEY:
+        logger.warning("Push notification skipped - VAPID_PRIVATE_KEY not configured")
+        return
+    payload = json.dumps({"title": title, "body": body, "url": url})
+    subs = await db.push_subscriptions.find({}, {"_id": 0}).to_list(2000)
+    for sub in subs:
+        try:
+            webpush(
+                subscription_info={
+                    "endpoint": sub["endpoint"],
+                    "keys": {"p256dh": sub["p256dh"], "auth": sub["auth"]},
+                },
+                data=payload,
+                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_claims={"sub": VAPID_SUBJECT},
+            )
+        except WebPushException as e:
+            status = e.response.status_code if e.response is not None else None
+            if status in (404, 410):
+                # Subscription expired or was revoked by the browser - clean it up
+                await db.push_subscriptions.delete_one({"endpoint": sub["endpoint"]})
+            else:
+                logger.warning("Push send failed for %s: %s", sub["endpoint"][:60], e)
+        except Exception as e:
+            # pywebpush's send() calls requests.post() with no exception wrapping, so a
+            # genuinely unreachable endpoint raises a raw requests exception here, not
+            # WebPushException. One bad subscription must never break the calling request
+            # (registration, audit completion, etc).
+            logger.warning("Push send errored for %s: %s", sub["endpoint"][:60], e)
 
 
 # ---------- Auth ----------
@@ -111,6 +165,11 @@ async def register(body: RegisterRequest):
         "created_at": now_iso(),
     }
     await db.users.insert_one({**user})
+    await send_push_to_all(
+        "New Registration Pending",
+        f"{user['name']} ({email}) is awaiting approval",
+        "/profile",
+    )
     return {"message": "Registration submitted. An admin must approve your account before you can sign in."}
 
 
@@ -531,6 +590,34 @@ async def on_startup():
     await seed_admin()
 
 
+# ---------- Notifications ----------
+@api_router.get("/notifications/vapid-public-key")
+async def get_vapid_public_key():
+    return {"key": VAPID_PUBLIC_KEY}
+
+
+@api_router.post("/notifications/subscribe")
+async def subscribe_push(body: PushSubscriptionIn, user: dict = Depends(get_current_user)):
+    await db.push_subscriptions.update_one(
+        {"endpoint": body.endpoint},
+        {"$set": {
+            "endpoint": body.endpoint,
+            "p256dh": body.keys.p256dh,
+            "auth": body.keys.auth,
+            "user_id": user["id"],
+            "created_at": now_iso(),
+        }},
+        upsert=True,
+    )
+    return {"ok": True}
+
+
+@api_router.post("/notifications/unsubscribe")
+async def unsubscribe_push(body: PushUnsubscribeIn, user: dict = Depends(get_current_user)):
+    await db.push_subscriptions.delete_one({"endpoint": body.endpoint, "user_id": user["id"]})
+    return {"ok": True}
+
+
 # ---------- Locations ----------
 ROOM_FLOORS = [
     {"floor": "4th Floor", "rooms": [400] + list(range(402, 413)) + list(range(414, 417))},
@@ -661,6 +748,15 @@ async def update_audit(audit_id: str, body: AuditUpdate):
                         "source_item_id": it["id"],
                         "created_at": now_iso(),
                     })
+        fail_count = sum(1 for i in items if i["result"] == "fail")
+        if fail_count:
+            loc = audit.get("location")
+            await send_push_to_all(
+                "Audit Issues Found",
+                f"{fail_count} failed check{'s' if fail_count != 1 else ''} in '{audit['template_name']}'"
+                + (f" at {loc}" if loc else ""),
+                f"/audit/{audit_id}",
+            )
     await db.audits.update_one({"id": audit_id}, {"$set": update})
     return await db.audits.find_one({"id": audit_id}, {"_id": 0})
 
