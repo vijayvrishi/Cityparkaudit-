@@ -13,6 +13,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { api, Audit, AuditItem } from "@/src/api";
 import { exportAuditPdf } from "@/src/pdf";
 import { showToast } from "@/src/toast";
+import { useAuth } from "@/src/auth";
 import { C, F, R, SP } from "@/src/theme";
 
 const RESULTS = [
@@ -25,6 +26,7 @@ export default function AuditScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { user } = useAuth();
   const [audit, setAudit] = useState<Audit | null>(null);
   const [items, setItems] = useState<AuditItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -182,6 +184,8 @@ export default function AuditScreen() {
   }
 
   const isCompleted = audit.status === "completed";
+  const isOwner = !audit.created_by || user?.role === "admin" || user?.id === audit.created_by;
+  const readOnly = isCompleted || !isOwner;
   const scoreColor = audit.score == null ? C.text3 : audit.score >= 85 ? C.success : audit.score >= 60 ? C.warn : C.error;
 
   return (
@@ -225,10 +229,19 @@ export default function AuditScreen() {
 
       <KeyboardAwareScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ padding: SP.lg, paddingBottom: isCompleted ? SP.xl : 120 }}
+        contentContainerStyle={{ padding: SP.lg, paddingBottom: readOnly ? SP.xl : 120 }}
         bottomOffset={100}
         showsVerticalScrollIndicator={false}
       >
+        {!isCompleted && !isOwner && (
+          <View style={styles.lockedBanner} testID="audit-locked-banner">
+            <Ionicons name="lock-closed-outline" size={16} color={C.warn} />
+            <Text style={styles.lockedBannerText}>
+              Started by {audit.auditor_name} — only they or an admin can edit this audit.
+            </Text>
+          </View>
+        )}
+
         {/* AI summary (completed) */}
         {isCompleted && (
           <View style={styles.summaryCard} testID="ai-summary-card">
@@ -271,7 +284,7 @@ export default function AuditScreen() {
                 <View key={item.id} style={[styles.itemCard, item.result === "fail" && { borderColor: C.error }]} testID={`audit-item-${item.id}`}>
                   <Text style={styles.itemText}>{item.text}</Text>
 
-                  {isCompleted ? (
+                  {readOnly ? (
                     <View style={styles.readonlyRow}>
                       <View style={[styles.resultPill, { backgroundColor: resultMeta?.bg || C.surface2 }]}>
                         <Text style={[styles.resultPillText, { color: resultMeta?.color || C.text3 }]}>
@@ -350,7 +363,7 @@ export default function AuditScreen() {
       </KeyboardAwareScrollView>
 
       {/* Sticky CTA */}
-      {!isCompleted && (
+      {!readOnly && (
         <View style={[styles.footer, { paddingBottom: insets.bottom + SP.md }]}>
           <Pressable
             testID="save-exit-button"
@@ -455,6 +468,11 @@ const styles = StyleSheet.create({
   saveText: { color: C.text2, fontSize: 14 },
   submitBtn: { flex: 2, minHeight: 50, borderRadius: R.md, backgroundColor: C.gold, alignItems: "center", justifyContent: "center" },
   submitText: { color: C.onGold, fontSize: 15, fontWeight: "500" },
+  lockedBanner: {
+    flexDirection: "row", alignItems: "center", gap: SP.sm, backgroundColor: C.warnBg,
+    borderRadius: R.md, borderWidth: 1, borderColor: C.warn, padding: SP.md, marginBottom: SP.md,
+  },
+  lockedBannerText: { color: C.warn, fontSize: 12, flex: 1 },
   summaryCard: {
     backgroundColor: C.surface, borderRadius: R.lg, padding: SP.xl, borderWidth: 1, borderColor: C.goldDeep,
     gap: SP.md, marginBottom: SP.sm,

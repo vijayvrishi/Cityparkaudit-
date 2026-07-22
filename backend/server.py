@@ -661,7 +661,7 @@ async def delete_template(template_id: str):
 
 
 # ---------- Audits ----------
-async def _create_audit_from_template(template_id: str, auditor_name: str, location: Optional[str]):
+async def _create_audit_from_template(template_id: str, auditor_name: str, location: Optional[str], created_by: str):
     template = await db.templates.find_one({"id": template_id}, {"_id": 0})
     if not template:
         raise HTTPException(404, "Template not found")
@@ -686,15 +686,24 @@ async def _create_audit_from_template(template_id: str, auditor_name: str, locat
         "ai_summary": None,
         "started_at": now_iso(),
         "completed_at": None,
+        "created_by": created_by,
     }
     await db.audits.insert_one({**audit})
     audit.pop("_id", None)
     return audit
 
 
+def assert_can_modify_audit(audit: dict, user: dict):
+    if user["role"] == "admin":
+        return
+    # Audits created before this field existed have no created_by - don't lock those out.
+    if audit.get("created_by") and audit["created_by"] != user["id"]:
+        raise HTTPException(403, "Only the auditor who started this audit (or an admin) can change it")
+
+
 @api_router.post("/audits")
-async def create_audit(body: AuditCreate):
-    return await _create_audit_from_template(body.template_id, body.auditor_name, body.location)
+async def create_audit(body: AuditCreate, user: dict = Depends(get_current_user)):
+    return await _create_audit_from_template(body.template_id, body.auditor_name, body.location, user["id"])
 
 
 @api_router.get("/audits")
@@ -719,10 +728,11 @@ def compute_score(items):
 
 
 @api_router.put("/audits/{audit_id}")
-async def update_audit(audit_id: str, body: AuditUpdate):
+async def update_audit(audit_id: str, body: AuditUpdate, user: dict = Depends(get_current_user)):
     audit = await db.audits.find_one({"id": audit_id}, {"_id": 0})
     if not audit:
         raise HTTPException(404, "Audit not found")
+    assert_can_modify_audit(audit, user)
     items = [i.dict() for i in body.items]
     update = {"items": items, "status": body.status}
     if body.status == "completed":
@@ -762,10 +772,12 @@ async def update_audit(audit_id: str, body: AuditUpdate):
 
 
 @api_router.delete("/audits/{audit_id}")
-async def delete_audit(audit_id: str):
-    res = await db.audits.delete_one({"id": audit_id})
-    if res.deleted_count == 0:
+async def delete_audit(audit_id: str, user: dict = Depends(get_current_user)):
+    audit = await db.audits.find_one({"id": audit_id}, {"_id": 0})
+    if not audit:
         raise HTTPException(404, "Audit not found")
+    assert_can_modify_audit(audit, user)
+    await db.audits.delete_one({"id": audit_id})
     return {"ok": True}
 
 
@@ -895,11 +907,11 @@ async def create_schedule(body: ScheduleCreate):
 
 
 @api_router.post("/schedules/{schedule_id}/start")
-async def start_scheduled_audit(schedule_id: str):
+async def start_scheduled_audit(schedule_id: str, user: dict = Depends(get_current_user)):
     s = await db.schedules.find_one({"id": schedule_id}, {"_id": 0})
     if not s:
         raise HTTPException(404, "Schedule not found")
-    audit = await _create_audit_from_template(s["template_id"], s["auditor_name"], s["location"])
+    audit = await _create_audit_from_template(s["template_id"], s["auditor_name"], s["location"], user["id"])
     today = datetime.now(timezone.utc).date()
     if s["recurrence"] == "daily":
         update = {"next_due": (today + timedelta(days=1)).isoformat()}

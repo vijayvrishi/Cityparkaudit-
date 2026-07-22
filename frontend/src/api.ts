@@ -48,6 +48,7 @@ export interface Audit {
   id: string; template_id: string; template_name: string; department: string; icon: string;
   auditor_name: string; location: string | null; status: "in_progress" | "completed"; items: AuditItem[];
   score: number | null; ai_summary: string | null; started_at: string; completed_at: string | null;
+  created_by?: string;
 }
 export interface ActionItem {
   id: string; title: string; description: string; department: string;
