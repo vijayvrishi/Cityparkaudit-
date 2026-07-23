@@ -1,11 +1,14 @@
 import React, { useCallback, useState } from "react";
 import {
-  ActivityIndicator, FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
+  ActivityIndicator, FlatList, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
+import * as ImagePicker from "expo-image-picker";
+import * as ImageManipulator from "expo-image-manipulator";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { api, ActionItem, TeamMember } from "@/src/api";
 import { showToast } from "@/src/toast";
@@ -17,6 +20,16 @@ const FILTERS = [
   { key: "in_progress", label: "In Progress" },
   { key: "resolved", label: "Resolved" },
 ];
+const DEPARTMENTS = ["General", "Front Office", "Housekeeping", "Food & Beverage", "Maintenance", "Wellness"];
+
+function formatReportedAt(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  if (sameDay) return `Today, ${time}`;
+  return `${d.toLocaleDateString(undefined, { day: "numeric", month: "short" })}, ${time}`;
+}
 const STATUS_META: Record<string, { label: string; color: string; bg: string }> = {
   open: { label: "Open", color: C.error, bg: C.errorBg },
   in_progress: { label: "In Progress", color: C.warn, bg: C.warnBg },
@@ -33,6 +46,8 @@ export default function ActionsScreen() {
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ title: "", description: "", department: "General", priority: "medium", assignee: "", due_date: null as string | null });
   const [saving, setSaving] = useState(false);
+  const [resolving, setResolving] = useState(false);
+  const [permBlocked, setPermBlocked] = useState(false);
 
   const dueOptions = (() => {
     const d = (days: number) => {
@@ -69,6 +84,10 @@ export default function ActionsScreen() {
   const filtered = filter === "all" ? items : items.filter((i) => i.status === filter);
 
   const setStatus = async (item: ActionItem, status: string) => {
+    if (status === "resolved" && !item.resolution_photo_base64) {
+      await resolveWithPhoto(item);
+      return;
+    }
     try {
       await api(`/action-items/${item.id}`, { method: "PATCH", body: JSON.stringify({ status }) });
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -77,6 +96,46 @@ export default function ActionsScreen() {
       load();
     } catch (e: any) {
       showToast(e.message, "error");
+    }
+  };
+
+  const resolveWithPhoto = async (item: ActionItem) => {
+    setResolving(true);
+    try {
+      let perm = await ImagePicker.getCameraPermissionsAsync();
+      if (!perm.granted) {
+        if (!perm.canAskAgain) { setPermBlocked(true); return; }
+        perm = await ImagePicker.requestCameraPermissionsAsync();
+        if (!perm.granted) {
+          if (!perm.canAskAgain) setPermBlocked(true);
+          return;
+        }
+      }
+      const result = await ImagePicker.launchCameraAsync({ quality: 0.5 });
+      if (result.canceled || !result.assets[0]) return;
+      const asset = result.assets[0];
+      const targetWidth = Math.min(asset.width || 1024, 1024);
+      const manipulated = await ImageManipulator.manipulateAsync(
+        asset.uri,
+        [{ resize: { width: targetWidth } }],
+        { compress: 0.5, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+      );
+      if (!manipulated.base64) {
+        showToast("Could not capture photo", "error");
+        return;
+      }
+      await api(`/action-items/${item.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "resolved", resolution_photo_base64: manipulated.base64 }),
+      });
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setSelected(null);
+      showToast("Marked as Resolved");
+      load();
+    } catch (e: any) {
+      showToast(e.message || "Could not capture photo", "error");
+    } finally {
+      setResolving(false);
     }
   };
 
@@ -167,6 +226,10 @@ export default function ActionsScreen() {
                 </View>
                 {!!item.description && <Text style={styles.cardDesc} numberOfLines={2}>{item.description}</Text>}
                 <View style={styles.metaRow}>
+                  <View style={styles.metaChip} testID={`action-reported-${item.id}`}>
+                    <Ionicons name="time-outline" size={12} color={C.text3} />
+                    <Text style={styles.metaChipText}>Reported {formatReportedAt(item.created_at)}</Text>
+                  </View>
                   {!!item.assignee && (
                     <View style={styles.metaChip} testID={`action-assignee-${item.id}`}>
                       <Ionicons name="person-outline" size={12} color={C.text3} />
@@ -201,6 +264,14 @@ export default function ActionsScreen() {
           <View style={[styles.sheet, { paddingBottom: insets.bottom + SP.lg }]}>
             <View style={styles.sheetHandle} />
             <Text style={styles.sheetTitle} numberOfLines={2}>{selected?.title}</Text>
+            {!!selected?.resolution_photo_base64 && (
+              <Image
+                source={{ uri: `data:image/jpeg;base64,${selected.resolution_photo_base64}` }}
+                style={styles.resolutionPhoto}
+                contentFit="cover"
+                testID="resolution-photo"
+              />
+            )}
             <Text style={styles.sheetSub}>Update status</Text>
             {Object.entries(STATUS_META).map(([key, meta]) => (
               <Pressable
@@ -208,10 +279,19 @@ export default function ActionsScreen() {
                 testID={`set-status-${key}`}
                 style={[styles.statusOption, selected?.status === key && { borderColor: C.gold }]}
                 onPress={() => selected && setStatus(selected, key)}
+                disabled={resolving}
               >
                 <View style={[styles.priorityDot, { backgroundColor: meta.color }]} />
-                <Text style={styles.statusOptionText}>{meta.label}</Text>
-                {selected?.status === key && <Ionicons name="checkmark" size={18} color={C.gold} />}
+                <Text style={styles.statusOptionText}>
+                  {key === "resolved" && !selected?.resolution_photo_base64 ? "Resolved (photo required)" : meta.label}
+                </Text>
+                {resolving && key === "resolved" ? (
+                  <ActivityIndicator color={C.gold} size="small" />
+                ) : selected?.status === key ? (
+                  <Ionicons name="checkmark" size={18} color={C.gold} />
+                ) : key === "resolved" ? (
+                  <Ionicons name="camera-outline" size={16} color={C.text3} />
+                ) : null}
               </Pressable>
             ))}
             <Text style={styles.sheetSub}>Assign to</Text>
@@ -242,6 +322,22 @@ export default function ActionsScreen() {
         </View>
       </Modal>
 
+      {/* Camera-permission-blocked sheet */}
+      <Modal visible={permBlocked} transparent animationType="slide" onRequestClose={() => setPermBlocked(false)}>
+        <View style={styles.modalBackdrop}>
+          <Pressable style={{ flex: 1 }} onPress={() => setPermBlocked(false)} />
+          <View style={[styles.sheet, { paddingBottom: insets.bottom + SP.lg }]}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>Camera Access Needed</Text>
+            <Text style={styles.sheetSub}>Camera access is blocked. Enable it in Settings to take a resolution photo.</Text>
+            <Pressable testID="open-settings-button" style={styles.statusOption} onPress={() => Linking.openSettings()}>
+              <Ionicons name="settings-outline" size={20} color={C.gold} />
+              <Text style={styles.statusOptionText}>Open Settings</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
       {/* Add item sheet */}
       <Modal visible={showAdd} transparent animationType="slide" onRequestClose={() => setShowAdd(false)}>
         <KeyboardAvoidingView behavior="padding" style={styles.modalBackdrop}>
@@ -267,14 +363,22 @@ export default function ActionsScreen() {
               onChangeText={(t) => setForm((f) => ({ ...f, description: t }))}
               multiline
             />
-            <TextInput
-              testID="action-dept-input"
-              style={styles.input}
-              placeholder="Department"
-              placeholderTextColor={C.text3}
-              value={form.department}
-              onChangeText={(t) => setForm((f) => ({ ...f, department: t }))}
-            />
+            <Text style={styles.sheetSub}>Concerned department</Text>
+            <View style={styles.assigneeWrap}>
+              {DEPARTMENTS.map((d) => {
+                const active = form.department === d;
+                return (
+                  <Pressable
+                    key={d}
+                    testID={`dept-option-${d.toLowerCase().replace(/\s+/g, "-")}`}
+                    style={[styles.assigneeChip, active && styles.assigneeChipActive]}
+                    onPress={() => setForm((f) => ({ ...f, department: d }))}
+                  >
+                    <Text style={[styles.assigneeChipText, active && { color: C.onGold }]}>{d}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
             <Text style={styles.sheetSub}>Assign to</Text>
             <View style={styles.assigneeWrap}>
               <Pressable
@@ -399,6 +503,7 @@ const styles = StyleSheet.create({
     borderRadius: R.md, paddingHorizontal: SP.lg, minHeight: 48, borderWidth: 1, borderColor: C.border,
   },
   statusOptionText: { color: C.text, fontSize: 14, flex: 1 },
+  resolutionPhoto: { width: "100%", height: 160, borderRadius: R.md, marginBottom: SP.xs },
   input: {
     backgroundColor: C.surface2, borderRadius: R.md, borderWidth: 1, borderColor: C.border,
     color: C.text, paddingHorizontal: SP.lg, minHeight: 48, fontSize: 15,

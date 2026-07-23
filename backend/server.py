@@ -258,6 +258,7 @@ class ActionItemUpdate(BaseModel):
     priority: Optional[str] = None
     assignee: Optional[str] = None
     due_date: Optional[str] = None
+    resolution_photo_base64: Optional[str] = None
 
 
 class ScheduleCreate(BaseModel):
@@ -845,12 +846,15 @@ async def create_action_item(body: ActionItemCreate):
 
 @api_router.patch("/action-items/{item_id}")
 async def update_action_item(item_id: str, body: ActionItemUpdate):
+    existing = await db.action_items.find_one({"id": item_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Action item not found")
     update = {k: v for k, v in body.dict().items() if v is not None}
     if not update:
         raise HTTPException(400, "Nothing to update")
-    res = await db.action_items.update_one({"id": item_id}, {"$set": update})
-    if res.matched_count == 0:
-        raise HTTPException(404, "Action item not found")
+    if update.get("status") == "resolved" and not update.get("resolution_photo_base64") and not existing.get("resolution_photo_base64"):
+        raise HTTPException(400, "Photo evidence is required to mark this as resolved")
+    await db.action_items.update_one({"id": item_id}, {"$set": update})
     return await db.action_items.find_one({"id": item_id}, {"_id": 0})
 
 

@@ -55,6 +55,7 @@ export interface ActionItem {
   priority: "low" | "medium" | "high"; status: "open" | "in_progress" | "resolved";
   audit_id: string | null; location?: string | null;
   assignee?: string | null; due_date?: string | null; created_at: string;
+  resolution_photo_base64?: string | null;
 }
 export interface Schedule {
   id: string; template_id: string; template_name: string; department: string; icon: string;
