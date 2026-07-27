@@ -7,8 +7,13 @@ No custom domain wired up yet — using default AWS/S3 URLs.
 
 | Component | URL |
 |---|---|
-| Frontend (web) | http://citypark-audit-frontend-516887748193-ap-south-1.s3-website.ap-south-1.amazonaws.com |
+| Frontend (web, HTTPS - use this one) | https://de4rf40r5r3h7.cloudfront.net |
+| Frontend (web, HTTP, origin - S3 direct, no service worker/push) | http://citypark-audit-frontend-516887748193-ap-south-1.s3-website.ap-south-1.amazonaws.com |
 | Backend API | https://ub8pyznzb7.execute-api.ap-south-1.amazonaws.com |
+
+Push notifications (and PWA installability) **require the HTTPS CloudFront URL**. Browsers refuse
+to register a service worker on a non-secure origin except `localhost` - the plain S3 URL can never
+support push, install prompts, or offline caching regardless of anything else. See Gotcha #7.
 
 Actual secret values (passwords, keys, connection strings) are **not** in this file or in git —
 see the separate credentials note delivered directly to the account owner. This file only
@@ -70,6 +75,7 @@ deployment paths:
 | IAM role (notifier exec) | `citypark-audit-notifier-role` | `arn:aws:iam::516887748193:role/citypark-audit-notifier-role` | `AWSLambdaBasicExecutionRole` only (CloudWatch Logs) |
 | EventBridge rule | `citypark-audit-notifier-hourly` | `arn:aws:events:ap-south-1:516887748193:rule/citypark-audit-notifier-hourly` | `rate(1 hour)` — invokes `citypark-audit-notifier` directly (not through API Gateway) |
 | Lambda permission | statement id `eventbridge-invoke` | — | Grants the EventBridge rule above permission to invoke `citypark-audit-notifier` |
+| CloudFront distribution | `E1W7WX24ARJYJY` (`de4rf40r5r3h7.cloudfront.net`) | `arn:aws:cloudfront::516887748193:distribution/E1W7WX24ARJYJY` | HTTPS front for the S3 static site — required for the service worker/push notifications/PWA install to work at all (browsers refuse service workers on plain HTTP). Custom origin = the S3 **website** endpoint (not the S3 REST endpoint) over `http-only`, since that's what preserves the `index.html`-as-error-document SPA-routing fallback; CloudFront itself terminates HTTPS for the viewer using the default `*.cloudfront.net` certificate (no ACM/custom domain needed). Cache policy: managed `CachingOptimized` (respects the origin's own `Cache-Control` headers, see the frontend deploy runbook) |
 
 ### MongoDB Atlas
 
@@ -160,7 +166,17 @@ aws s3 cp dist/manifest.webmanifest "s3://$BUCKET/manifest.webmanifest" --region
   --cache-control "no-cache, no-store, must-revalidate" --content-type "application/manifest+json"
 aws s3 cp dist/sw.js "s3://$BUCKET/sw.js" --region ap-south-1 \
   --cache-control "no-cache, no-store, must-revalidate" --content-type "text/javascript"
+
+# CloudFront respects the origin's Cache-Control (managed CachingOptimized policy), so this
+# is normally redundant for index.html/manifest/sw.js - but invalidate anyway as a cheap
+# safety net against any edge-cache edge case:
+aws cloudfront create-invalidation --distribution-id E1W7WX24ARJYJY \
+  --paths "/index.html" "/manifest.webmanifest" "/sw.js"
 ```
+
+Always test against **`https://de4rf40r5r3h7.cloudfront.net`**, not the plain S3 URL - the S3 URL
+never runs the service worker (see Gotcha #7), so testing there for a push/PWA change will look
+broken even when the code is correct.
 
 ### Update an environment variable / rotate a secret
 
@@ -215,6 +231,14 @@ aws lambda invoke --function-name citypark-audit-notifier --region ap-south-1 ou
 ### Tear down everything
 
 ```bash
+# CloudFront must be disabled before it can be deleted, and disabling takes a few minutes to
+# propagate - get-distribution-config for the current ETag first, this is just the shape:
+aws cloudfront get-distribution-config --id E1W7WX24ARJYJY  # note the ETag
+# ... set "Enabled": false in the config, then:
+aws cloudfront update-distribution --id E1W7WX24ARJYJY --if-match <ETag> --distribution-config file://disabled-config.json
+# wait for Status to become "Deployed" again (now disabled), then:
+aws cloudfront delete-distribution --id E1W7WX24ARJYJY --if-match <new-ETag>
+
 aws events remove-targets --rule citypark-audit-notifier-hourly --ids 1 --region ap-south-1
 aws events delete-rule --name citypark-audit-notifier-hourly --region ap-south-1
 aws lambda delete-function --function-name citypark-audit-notifier --region ap-south-1
@@ -298,11 +322,15 @@ Lambda function (`Port: "8001"` since the Dockerfile's uvicorn binds there).
    the fact by `frontend/scripts/inject-pwa-head.js`, run via `npm run export:web`. If you ever
    switch `web.output` to `"static"`, move that logic back into `+html.tsx` and delete the script.
 
-7. **PWA installability needs HTTPS.** Service workers won't register on a plain-HTTP origin
-   (browsers require HTTPS or `localhost`). The manifest/icons/service worker are all deployed and
-   working, but "Add to Home Screen" / install-prompt behavior won't fully activate until the
-   frontend is served over HTTPS (e.g. via CloudFront in front of the S3 bucket, or a custom
-   domain with ACM).
+7. **PWA installability (and push notifications) need HTTPS.** Service workers - which both
+   features depend on entirely - refuse to register on a plain-HTTP origin (browsers require
+   HTTPS or `localhost`). This was live as an *open* gap for a while: push notifications were
+   fully built and looked correct end-to-end (VAPID, subscribe endpoint, notifier Lambda all
+   verified working), but nothing could actually arrive because the site was still on the plain
+   S3 HTTP URL - `isPushSupported()` would have been silently returning `false` in any real
+   browser the whole time. Fixed by putting the CloudFront distribution (`E1W7WX24ARJYJY`) in
+   front of the S3 site. **Always use the `https://de4rf40r5r3h7.cloudfront.net` URL** - the
+   plain S3 URL still works for viewing the app, but will never support push/install/offline.
 
 8. **Lambda's synchronous invocation payload limit is a hard, non-configurable 6MB** (request and
    response). Audit photos are stored as base64 directly in the audit's JSON body (`photo_base64`
