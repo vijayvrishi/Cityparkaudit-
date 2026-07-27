@@ -10,9 +10,15 @@ import { useAuth } from "@/src/auth";
 import { showToast } from "@/src/toast";
 import { C, F, R, SP } from "@/src/theme";
 import {
-  isPushSupported, getNotificationPermission, getExistingSubscription,
+  isPushSupported, getPushUnsupportedReason, getNotificationPermission, getExistingSubscription,
   enablePushNotifications, disablePushNotifications,
 } from "@/src/push";
+
+const PUSH_HELP_TEXT: Record<string, string> = {
+  insecure: "Open the app at https://de4rf40r5r3h7.cloudfront.net to enable notifications — the current link doesn't support them.",
+  "ios-not-installed": "On iPhone/iPad: tap Share, then \"Add to Home Screen\" — iOS only allows notifications for the installed app.",
+  unsupported: "Notifications aren't supported in this browser.",
+};
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
@@ -22,6 +28,7 @@ export default function ProfileScreen() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(isAdmin);
   const [pushSupported] = useState(isPushSupported());
+  const [pushUnsupportedReason] = useState(getPushUnsupportedReason());
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
 
@@ -148,6 +155,16 @@ export default function ProfileScreen() {
                   </View>
                 )}
               </Pressable>
+            )}
+
+            {!pushSupported && pushUnsupportedReason && (
+              <View testID="notifications-unsupported" style={styles.notifRow}>
+                <Ionicons name="notifications-off-outline" size={18} color={C.text3} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.notifTitle}>Notifications unavailable</Text>
+                  <Text style={styles.notifSub}>{PUSH_HELP_TEXT[pushUnsupportedReason]}</Text>
+                </View>
+              </View>
             )}
 
             <Pressable testID="logout-button" style={styles.logoutBtn} onPress={logout}>
