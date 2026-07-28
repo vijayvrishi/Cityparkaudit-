@@ -151,7 +151,16 @@ aws lambda update-function-code --function-name citypark-audit-backend \
 cd frontend
 # frontend/.env.production should already have:
 #   EXPO_PUBLIC_BACKEND_URL=https://ub8pyznzb7.execute-api.ap-south-1.amazonaws.com
+# frontend/.env must NOT exist (see Gotcha #11) - if it does, delete it:
+rm -f .env
+# Metro caches the resolved env value per bundle, so a stale cache can keep baking in an old
+# URL even after fixing the .env files above (see Gotcha #11) - when in doubt, clear it:
+rm -rf .metro-cache node_modules/.cache dist
 EXPO_OFFLINE=1 npm run export:web   # = expo export --platform web + inject-pwa-head.js
+# Sanity check before deploying - the bundle must reference execute-api, never localhost:
+grep -o '_expo/static/js/web/[a-zA-Z0-9.]*\.js' dist/index.html
+grep -c "execute-api" dist/_expo/static/js/web/entry-*.js   # must be >=1
+grep -c "localhost" dist/_expo/static/js/web/entry-*.js     # must be 0
 
 BUCKET=citypark-audit-frontend-516887748193-ap-south-1
 # Long-cache the hashed/static assets...
@@ -364,3 +373,21 @@ Lambda function (`Port: "8001"` since the Dockerfile's uvicorn binds there).
     or audit completion. Both `send_push_to_all` implementations (in `server.py` and
     `backend/notifier/notifier.py`) catch a bare `Exception` around each individual send for this
     reason - never narrow that back to `WebPushException` alone.
+
+11. **A stray `frontend/.env` (no suffix) silently overrides `frontend/.env.production` for
+    *every* production build, including `expo export`.** This repo's local-testing workflow
+    (see the Playwright section above) creates `frontend/.env` with
+    `EXPO_PUBLIC_BACKEND_URL=http://localhost:8001` to test against a local mock backend, then is
+    supposed to restore `.env.production` afterwards - but `.env.production` was never touched by
+    that workflow; the problem is `.env` itself was left behind, and Expo's env loading appears to
+    let the base `.env` win over `.env.production` in practice (confirmed by grepping the built
+    bundle for `localhost:8001` vs `execute-api`), not the reverse as the precedence docs suggest.
+    On top of that, **Metro caches the bundled env value**, so even deleting `.env` doesn't fix a
+    build until `.metro-cache`/`node_modules/.cache`/`dist` are also cleared - a plain re-export
+    can keep baking in the stale URL. This shipped a production frontend that called
+    `http://localhost:8001` for every API request - i.e. the entire app silently broken for real
+    users (reported as "Admin login showing failed", but it would have broken everything, not
+    just login) - for several days undetected, because `curl`-testing the backend directly always
+    looked fine. Fixed by deleting the stray `.env`, clearing Metro's cache, and rebuilding - see
+    the sanity-check `grep`s added to the redeploy runbook above. **Always run those greps on
+    `dist/` before syncing to S3**, especially after any local-testing session.
