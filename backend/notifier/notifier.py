@@ -5,9 +5,13 @@ from datetime import datetime, timezone
 
 from motor.motor_asyncio import AsyncIOMotorClient
 from pywebpush import webpush, WebPushException
+from py_vapid import Vapid01
 
-VAPID_PRIVATE_KEY = os.environ["VAPID_PRIVATE_KEY"]
 VAPID_SUBJECT = os.environ.get("VAPID_SUBJECT", "mailto:admin@cityparkhotel.in")
+# pywebpush's from_string() fallback strips newlines but keeps the PEM BEGIN/END
+# markers, so it can never actually parse a full PEM string - build a real
+# Vapid01 object via from_pem() instead. See backend/DEPLOYMENT.md Gotcha #12.
+_vapid = Vapid01.from_pem(os.environ["VAPID_PRIVATE_KEY"].encode())
 
 
 def today_str() -> str:
@@ -25,7 +29,7 @@ async def send_push_to_all(db, title: str, body: str, url: str = "/"):
                     "keys": {"p256dh": sub["p256dh"], "auth": sub["auth"]},
                 },
                 data=payload,
-                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_private_key=_vapid,
                 vapid_claims={"sub": VAPID_SUBJECT},
             )
         except WebPushException as e:

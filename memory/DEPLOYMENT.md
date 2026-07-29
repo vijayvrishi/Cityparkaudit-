@@ -391,3 +391,33 @@ Lambda function (`Port: "8001"` since the Dockerfile's uvicorn binds there).
     looked fine. Fixed by deleting the stray `.env`, clearing Metro's cache, and rebuilding - see
     the sanity-check `grep`s added to the redeploy runbook above. **Always run those greps on
     `dist/` before syncing to S3**, especially after any local-testing session.
+
+12. **`pywebpush`'s `Vapid.from_string()` fallback cannot actually parse a full PEM string** -
+    passing `VAPID_PRIVATE_KEY` (the full `-----BEGIN PRIVATE KEY----- ... -----END-----` PEM
+    block) straight into `webpush(vapid_private_key=...)` routes through `py_vapid`'s
+    `from_string()`, which does `private_key.encode().replace(b"\n", b"")` on the *entire* string -
+    stripping newlines but leaving the `-----BEGIN PRIVATE KEY-----`/`-----END-----` text glued
+    onto the base64 body, then tries to base64url-decode that mess. It always fails with
+    `Could not deserialize key data ... ASN.1 parsing error: invalid length` - every single push
+    send, forever, with subscriptions saving successfully and no error surfaced anywhere except a
+    per-send warning log. (`Vapid.from_pem()` handles this correctly - it drops the first/last
+    line before decoding - but `from_string()`, which is what a bare string argument to `webpush()`
+    goes through, does not.) Symptom: users can enable notifications, the toggle works, the
+    subscription reaches the backend and saves fine, but *no notification of any kind ever
+    arrives*, indefinitely. Verified via CloudWatch logs on `citypark-audit-backend` - real
+    subscriptions (`web.push.apple.com`, `fcm.googleapis.com`) were present, every send attempt
+    logged the ASN.1 error. Fixed in both `server.py` and `backend/notifier/notifier.py` by
+    building a `Vapid01` instance once via `Vapid01.from_pem(VAPID_PRIVATE_KEY.encode())` at
+    module load and passing that object (not the raw string) as `vapid_private_key=` - `webpush()`
+    special-cases `isinstance(vapid_private_key, Vapid01)` and uses it directly, bypassing
+    `from_string()` entirely.
+
+13. **`backend/lambda_handler.py` had regressed to `Mangum(app)` (default `lifespan="auto"`)
+    in git, with no record of when or why** - the Gotcha #2 fix (`lifespan="off"`) had apparently
+    only ever been applied to whatever zip was manually deployed during the SEED_VERSION toggle
+    dance, never committed back to the source file itself. Redeploying straight from git (as any
+    normal code-fix redeploy does) silently reintroduced the "Cannot use MongoClient after close"
+    crash on warm containers - intermittent 500s on essentially every endpoint, including login/
+    register. **`lifespan="off"` must be the permanent, committed state of `lambda_handler.py`** -
+    never leave it as `"auto"` after the temporary re-seed toggle in the runbook above, and treat
+    any diff that touches this file as high-risk to double check before deploying.

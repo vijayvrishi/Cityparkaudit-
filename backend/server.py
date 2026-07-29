@@ -15,6 +15,7 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
 from pywebpush import webpush, WebPushException
+from py_vapid import Vapid01
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -39,6 +40,16 @@ VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "")
 VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY", "")
 VAPID_SUBJECT = os.environ.get("VAPID_SUBJECT", "mailto:admin@cityparkhotel.in")
 
+# pywebpush's own from_string() fallback strips newlines but keeps the PEM
+# BEGIN/END markers, so it can never actually parse a full PEM string - it
+# needs a real Vapid01 object built via from_pem() instead. See Gotcha #12.
+_vapid: Optional[Vapid01] = None
+if VAPID_PRIVATE_KEY:
+    try:
+        _vapid = Vapid01.from_pem(VAPID_PRIVATE_KEY.encode())
+    except Exception:
+        logger.exception("Failed to parse VAPID_PRIVATE_KEY")
+
 
 class PushKeys(BaseModel):
     p256dh: str
@@ -55,7 +66,7 @@ class PushUnsubscribeIn(BaseModel):
 
 
 async def send_push_to_all(title: str, body: str, url: str = "/"):
-    if not VAPID_PRIVATE_KEY:
+    if not _vapid:
         logger.warning("Push notification skipped - VAPID_PRIVATE_KEY not configured")
         return
     payload = json.dumps({"title": title, "body": body, "url": url})
@@ -68,7 +79,7 @@ async def send_push_to_all(title: str, body: str, url: str = "/"):
                     "keys": {"p256dh": sub["p256dh"], "auth": sub["auth"]},
                 },
                 data=payload,
-                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_private_key=_vapid,
                 vapid_claims={"sub": VAPID_SUBJECT},
             )
         except WebPushException as e:
