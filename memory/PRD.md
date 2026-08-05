@@ -32,7 +32,7 @@
 
 - Auth (June 2026): JWT email/password login with admin approval — register creates pending users, admin approves via Profile screen; all /api/* protected (HTTPBearer + get_current_user); seeded admin admin@citypark.com (creds in /app/memory/test_credentials.md); token in SecureStore; AuthProvider route guard (src/auth.tsx)
 - Room coverage: GET /api/analytics/room-coverage?days=7 + Coverage tab in Analytics (per-floor room grid, audited rooms green)
-- Action items: assignee + due_date fields (create form inputs + due chips, overdue shown red); auto-created items from failed checks get due_date = +3 days
+- Action items: assignee + due_date fields (create form inputs + due chips, overdue shown red); auto-created items from failed checks get due_date = +24 hours; overdue open action items blink on the Home screen
 - Testing: iteration 3 — auth/coverage/assignee flows passed; 2 bugs found & fixed (auto action-item due_date, profile button untappable on hero); tests at /app/backend/tests/test_auth_and_coverage.py
 
 ## User Personas

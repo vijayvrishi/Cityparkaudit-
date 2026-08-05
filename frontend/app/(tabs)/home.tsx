@@ -1,6 +1,6 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View,
+  ActivityIndicator, Animated, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -13,6 +13,36 @@ import { C, F, R, SP } from "@/src/theme";
 
 const HERO_IMG = "https://images.pexels.com/photos/18415806/pexels-photo-18415806.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940";
 
+function useBlink() {
+  const opacity = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 0.25, duration: 550, useNativeDriver: false }),
+        Animated.timing(opacity, { toValue: 1, duration: 550, useNativeDriver: false }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [opacity]);
+  return opacity;
+}
+
+function OverdueBadge() {
+  const opacity = useBlink();
+  return (
+    <Animated.View style={[styles.overdueBadge, { opacity }]} testID="overdue-badge">
+      <Ionicons name="alert-circle" size={11} color={C.error} />
+      <Text style={styles.overdueBadgeText}>Overdue</Text>
+    </Animated.View>
+  );
+}
+
+function BlinkDot() {
+  const opacity = useBlink();
+  return <Animated.View style={[styles.priorityDot, { backgroundColor: C.error, opacity }]} testID="overdue-blink-dot" />;
+}
+
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -22,6 +52,7 @@ export default function HomeScreen() {
   const [stats, setStats] = useState<Analytics | null>(null);
   const [inProgress, setInProgress] = useState<Audit[]>([]);
   const [openActions, setOpenActions] = useState<ActionItem[]>([]);
+  const [overdueCount, setOverdueCount] = useState(0);
   const [dueSchedules, setDueSchedules] = useState<Schedule[]>([]);
 
   const load = useCallback(async () => {
@@ -35,7 +66,13 @@ export default function HomeScreen() {
       ]);
       setStats(a);
       setInProgress(ip);
-      setOpenActions(acts.slice(0, 3));
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const isOverdue = (it: ActionItem) => !!it.due_date && it.due_date < todayStr;
+      setOverdueCount(acts.filter(isOverdue).length);
+      // Overdue items surface first so a stale complaint can't get buried behind newer,
+      // non-urgent ones in the top-3 slice shown here.
+      const sorted = [...acts].sort((x, y) => Number(isOverdue(y)) - Number(isOverdue(x)));
+      setOpenActions(sorted.slice(0, 3));
       setDueSchedules(scheds.filter((s) => s.due_status === "due_today" || s.due_status === "overdue"));
     } catch (e: any) {
       setError(e.message);
@@ -200,28 +237,40 @@ export default function HomeScreen() {
         )}
 
         {/* Open action items */}
-        <Text style={styles.sectionTitle}>Open Action Items</Text>
+        <View style={styles.sectionRow}>
+          <Text style={styles.sectionTitleInline}>Open Action Items</Text>
+          {overdueCount > 0 && <OverdueBadge />}
+        </View>
         {openActions.length === 0 ? (
           <View style={styles.emptyBox} testID="home-no-actions">
             <Ionicons name="shield-checkmark-outline" size={22} color={C.text3} />
             <Text style={styles.emptyText}>All clear — no open issues</Text>
           </View>
         ) : (
-          openActions.map((it) => (
-            <Pressable
-              key={it.id}
-              testID={`home-action-${it.id}`}
-              style={styles.actionRow}
-              onPress={() => router.push("/(tabs)/actions")}
-            >
-              <View style={[styles.priorityDot, { backgroundColor: it.priority === "high" ? C.error : it.priority === "medium" ? C.warn : C.text3 }]} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.actionTitle} numberOfLines={1}>{it.title}</Text>
-                <Text style={styles.auditMeta}>{it.department}</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={16} color={C.text3} />
-            </Pressable>
-          ))
+          openActions.map((it) => {
+            const overdue = !!it.due_date && it.due_date < new Date().toISOString().slice(0, 10);
+            return (
+              <Pressable
+                key={it.id}
+                testID={`home-action-${it.id}`}
+                style={[styles.actionRow, overdue && styles.actionRowOverdue]}
+                onPress={() => router.push("/(tabs)/actions")}
+              >
+                {overdue ? (
+                  <BlinkDot />
+                ) : (
+                  <View style={[styles.priorityDot, { backgroundColor: it.priority === "high" ? C.error : it.priority === "medium" ? C.warn : C.text3 }]} />
+                )}
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.actionTitle} numberOfLines={1}>{it.title}</Text>
+                  <Text style={[styles.auditMeta, overdue && { color: C.error }]}>
+                    {overdue ? "Overdue · " : ""}{it.department}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color={C.text3} />
+              </Pressable>
+            );
+          })
         )}
       </ScrollView>
     </View>
@@ -313,6 +362,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: SP.lg, paddingVertical: SP.md, flexDirection: "row", alignItems: "center", gap: SP.md,
     borderWidth: 1, borderColor: C.border,
   },
+  actionRowOverdue: { borderColor: C.error },
   priorityDot: { width: 8, height: 8, borderRadius: 4 },
   actionTitle: { color: C.text, fontSize: 14 },
+  overdueBadge: {
+    flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: C.errorBg,
+    borderRadius: R.pill, paddingHorizontal: SP.sm, paddingVertical: 4,
+  },
+  overdueBadgeText: { color: C.error, fontSize: 11, fontWeight: "600" },
 });

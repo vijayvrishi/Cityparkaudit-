@@ -3,7 +3,7 @@ Iteration 3 backend tests:
 - JWT auth on /api/*
 - register/login/approve/delete users
 - room-coverage endpoint
-- action items with assignee/due_date + auto-created action items get +3 days
+- action items with assignee/due_date + auto-created action items get +24 hours
 Regression: templates/audits/analytics/action-items still work with token.
 """
 import os
@@ -231,7 +231,7 @@ class TestActionItemsExtras:
         assert r.status_code == 200
 
     def test_auto_action_item_from_failed_check(self, admin_hdr):
-        # NOTE: per spec, auto-created items from failed audit checks should get due_date = +3 days
+        # NOTE: per spec, auto-created items from failed audit checks should get due_date = +24 hours
         t = requests.get(f"{API}/templates", headers=admin_hdr, timeout=10).json()[0]
         c = requests.post(f"{API}/audits", headers=admin_hdr, json={
             "template_id": t["id"], "auditor_name": "TEST_autoact",
@@ -247,13 +247,13 @@ class TestActionItemsExtras:
         acts = requests.get(f"{API}/action-items", headers=admin_hdr, timeout=10).json()
         auto = [a for a in acts if a.get("audit_id") == c["id"]]
         assert auto, "auto action item not created"
-        # per spec, due_date should be +3 days
+        # per spec, due_date should be +24 hours
         if auto[0].get("due_date"):
-            expected = (datetime.now(timezone.utc).date() + timedelta(days=3)).isoformat()
+            expected = (datetime.now(timezone.utc) + timedelta(hours=24)).date().isoformat()
             assert auto[0]["due_date"] == expected, \
-                f"expected +3 days ({expected}), got {auto[0]['due_date']}"
+                f"expected +24 hours ({expected}), got {auto[0]['due_date']}"
         else:
-            pytest.fail("auto-created action item has no due_date (spec requires +3 days)")
+            pytest.fail("auto-created action item has no due_date (spec requires +24 hours)")
         # cleanup
         for a in auto:
             requests.delete(f"{API}/action-items/{a['id']}", headers=admin_hdr, timeout=10)

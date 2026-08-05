@@ -766,7 +766,7 @@ async def update_audit(audit_id: str, body: AuditUpdate, user: dict = Depends(ge
                         "audit_id": audit_id,
                         "location": loc,
                         "assignee": None,
-                        "due_date": (datetime.now(timezone.utc) + timedelta(days=3)).date().isoformat(),
+                        "due_date": (datetime.now(timezone.utc) + timedelta(hours=24)).date().isoformat(),
                         "source_item_id": it["id"],
                         "created_at": now_iso(),
                     })
