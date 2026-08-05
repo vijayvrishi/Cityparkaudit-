@@ -843,7 +843,18 @@ async def generate_summary(audit_id: str):
 @api_router.get("/action-items")
 async def list_action_items(status: Optional[str] = None):
     query = {"status": status} if status else {}
-    return await db.action_items.find(query, {"_id": 0}).sort("created_at", -1).to_list(500)
+    # resolution_photo_base64 is excluded here - with enough resolved items on file, returning
+    # every photo inline blows past Lambda's 6MB response limit and 500s the whole list (see
+    # Gotcha #8/#14). The detail view fetches the single item (with its photo) on demand instead.
+    return await db.action_items.find(query, {"_id": 0, "resolution_photo_base64": 0}).sort("created_at", -1).to_list(500)
+
+
+@api_router.get("/action-items/{item_id}")
+async def get_action_item(item_id: str):
+    item = await db.action_items.find_one({"id": item_id}, {"_id": 0})
+    if not item:
+        raise HTTPException(404, "Action item not found")
+    return item
 
 
 @api_router.post("/action-items")

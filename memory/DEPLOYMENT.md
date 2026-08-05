@@ -421,3 +421,15 @@ Lambda function (`Port: "8001"` since the Dockerfile's uvicorn binds there).
     register. **`lifespan="off"` must be the permanent, committed state of `lambda_handler.py`** -
     never leave it as `"auto"` after the temporary re-seed toggle in the runbook above, and treat
     any diff that touches this file as high-risk to double check before deploying.
+
+14. **`GET /action-items` had no projection excluding `resolution_photo_base64`** (unlike
+    `GET /audits`, which has always excluded `items.photo_base64` - see Gotcha #8). Once enough
+    resolved action items accumulated with resolution photos attached, the combined response blew
+    past Lambda's 6MB response limit and *every* call to the endpoint failed with a hard 413
+    (`Exceeded maximum allowed payload size`) - the Actions tab couldn't load at all, for anyone,
+    regardless of filter. Fixed by excluding `resolution_photo_base64` from the list projection
+    and adding `GET /action-items/{item_id}` for the single-item fetch the detail sheet now makes
+    on demand (only when opening a *resolved* item, since open/in-progress items never have a
+    resolution photo). **Any list endpoint that can carry inline base64 photos needs an explicit
+    projection excluding them, checked before it ships, not after production data grows into it** -
+    this is the same failure mode as Gotcha #8, just on a different endpoint.

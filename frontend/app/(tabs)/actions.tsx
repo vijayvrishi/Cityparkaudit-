@@ -30,6 +30,21 @@ function formatReportedAt(iso: string): string {
   if (sameDay) return `Today, ${time}`;
   return `${d.toLocaleDateString(undefined, { day: "numeric", month: "short" })}, ${time}`;
 }
+// The list endpoint omits resolution_photo_base64 (a resolved-items list with every photo
+// inline can blow past Lambda's 6MB response limit) - fetch the single item for its photo
+// only when opening a resolved item's detail sheet.
+async function openActionItem(item: ActionItem, setSelected: (i: ActionItem) => void) {
+  setSelected(item);
+  if (item.status === "resolved") {
+    try {
+      const full = await api<ActionItem>(`/action-items/${item.id}`);
+      setSelected(full);
+    } catch {
+      // keep the list-derived item; the sheet just won't show the resolution photo
+    }
+  }
+}
+
 const STATUS_META: Record<string, { label: string; color: string; bg: string }> = {
   open: { label: "Open", color: C.error, bg: C.errorBg },
   in_progress: { label: "In Progress", color: C.warn, bg: C.warnBg },
@@ -219,7 +234,7 @@ export default function ActionsScreen() {
             const meta = STATUS_META[item.status];
             const overdue = !!item.due_date && item.status !== "resolved" && item.due_date < new Date().toISOString().slice(0, 10);
             return (
-              <Pressable testID={`action-card-${item.id}`} style={styles.card} onPress={() => setSelected(item)}>
+              <Pressable testID={`action-card-${item.id}`} style={styles.card} onPress={() => openActionItem(item, setSelected)}>
                 <View style={styles.cardRow}>
                   <View style={[styles.priorityDot, { backgroundColor: item.priority === "high" ? C.error : item.priority === "medium" ? C.warn : C.text3 }]} />
                   <Text style={styles.cardTitle} numberOfLines={2}>{item.title}</Text>
