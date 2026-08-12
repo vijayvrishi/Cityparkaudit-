@@ -1,13 +1,14 @@
 import os
 import json
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from motor.motor_asyncio import AsyncIOMotorClient
 from pywebpush import webpush, WebPushException
 from py_vapid import Vapid01
 
 VAPID_SUBJECT = os.environ.get("VAPID_SUBJECT", "mailto:admin@cityparkhotel.in")
+HISTORY_RETENTION_DAYS = 60
 # pywebpush's from_string() fallback strips newlines but keeps the PEM BEGIN/END
 # markers, so it can never actually parse a full PEM string - build a real
 # Vapid01 object via from_pem() instead. See backend/DEPLOYMENT.md Gotcha #12.
@@ -45,6 +46,20 @@ async def send_push_to_all(db, title: str, body: str, url: str = "/"):
             print(f"Push send errored for {sub['endpoint'][:60]}: {e}")
 
 
+async def purge_old_audits(db) -> int:
+    # Guarded to run at most once/day (like last_notified_date below) - a full
+    # collection scan on every hourly invocation isn't worth it for a job that
+    # only needs day-level granularity.
+    today = today_str()
+    meta = await db.meta.find_one({"key": "last_purge_date"})
+    if meta and meta.get("value") == today:
+        return 0
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=HISTORY_RETENTION_DAYS)).isoformat()
+    result = await db.audits.delete_many({"status": "completed", "completed_at": {"$lt": cutoff}})
+    await db.meta.update_one({"key": "last_purge_date"}, {"$set": {"value": today}}, upsert=True)
+    return result.deleted_count
+
+
 async def run_checks():
     # Fresh client scoped to this single invocation only - never reused across
     # warm Lambda invocations, so there's no risk of the "MongoClient after
@@ -78,7 +93,9 @@ async def run_checks():
             await send_push_to_all(db, "Action Item Overdue", it["title"], "/actions")
             await db.action_items.update_one({"id": it["id"]}, {"$set": {"overdue_notified": True}})
 
-        print(f"Notifier run: {len(due_schedules)} due schedules, {len(overdue_items)} overdue items")
+        purged = await purge_old_audits(db)
+
+        print(f"Notifier run: {len(due_schedules)} due schedules, {len(overdue_items)} overdue items, {purged} audits purged")
     finally:
         client.close()
 

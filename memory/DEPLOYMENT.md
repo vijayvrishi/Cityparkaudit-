@@ -433,3 +433,17 @@ Lambda function (`Port: "8001"` since the Dockerfile's uvicorn binds there).
     resolution photo). **Any list endpoint that can carry inline base64 photos needs an explicit
     projection excluding them, checked before it ships, not after production data grows into it** -
     this is the same failure mode as Gotcha #8, just on a different endpoint.
+
+15. **The MongoDB Atlas M0 (free tier) cluster hit its 512MB storage cap** - reads kept working
+    but every write started failing with a raw, un-JSON'd `500 Internal Server Error` (Lambda's own
+    generic error page, meaning the exception was unhandled). Symptom: `POST /audits` and
+    `PUT /audits/{id}` both failed - the latter surfaced to users as a bare "Failed to fetch" on
+    Complete Audit, with no way to tell it was a storage problem from the client side. Diagnosed by
+    noticing GET endpoints worked fine while every write 500'd - that read/write split is the
+    signature of a storage-full Atlas cluster, not a code bug. Fixed by upgrading the cluster off
+    M0 to a paid tier (M2/M5) via the Atlas UI - confirmed via a live create+complete+delete audit
+    round-trip immediately after the upgrade. To prevent recurrence, `backend/notifier/notifier.py`
+    now purges `completed` audits older than `HISTORY_RETENTION_DAYS` (60) once per day (guarded by
+    a `last_purge_date` doc in `db.meta`, same pattern as the schedule/overdue-item dedup below it)
+    - base64 photos inline in audit/action-item documents are what filled the free tier so fast in
+    the first place, so retention matters more here than in a typical app.
